@@ -28,6 +28,7 @@ class RecipeResponse(RecipeBase):
     created_at: datetime
     description: Optional[str] = None
     category_id: int
+    owner_id: int
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

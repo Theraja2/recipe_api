@@ -9,6 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.dependencies.auth import get_current_user
+from app.models.user import User
 from app.dependencies.database import get_session
 from app.models.category import Category
 from app.models.recipe import Recipe
@@ -44,31 +46,30 @@ router = APIRouter(
 @router.post(
     "",
     response_model=RecipeResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_201_CREATED
 )
 async def create_recipe(
     recipe_data: RecipeCreate,
     db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     recipe = Recipe(
         name=recipe_data.name,
         description=recipe_data.description,
         category_id=recipe_data.category_id,
+        owner_id=current_user.id,
     )
 
     db.add(recipe)
 
     await db.commit()
-
     await db.refresh(recipe)
 
     return recipe
 
 
-# ============================================================
 # LIST RECIPES
 # GET /recipes
-# ============================================================
 
 @router.get(
     "",
@@ -87,10 +88,8 @@ async def list_recipes(
     return recipes
 
 
-# ============================================================
 # GET ONE RECIPE
 # GET /recipes/{recipe_id}
-# ============================================================
 
 @router.get(
     "/{recipe_id}",
@@ -119,43 +118,38 @@ async def get_recipe(
 
     return recipe
 
+
+
+
 @router.put(
     "/{recipe_id}",
-    response_model=RecipeResponse,
-    status_code=status.HTTP_200_OK,
+    response_model=RecipeResponse
 )
 async def update_recipe(
     recipe_id: int,
     recipe_data: RecipeUpdate,
     db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    # --------------------------------------------------------
-    # FIND RECIPE
-    # --------------------------------------------------------
-
-    statement = select(Recipe).where(
-        Recipe.id == recipe_id
+    result = await db.execute(
+        select(Recipe).where(
+            Recipe.id == recipe_id
+        )
     )
 
-    result = await db.execute(statement)
-
     recipe = result.scalar_one_or_none()
-
-
-    # --------------------------------------------------------
-    # CHECK IF RECIPE EXISTS
-    # --------------------------------------------------------
 
     if recipe is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Recipe not found",
+            detail="Recipe not found"
         )
 
-
-    # --------------------------------------------------------
-    # MODIFY RECIPE
-    # --------------------------------------------------------
+    if recipe.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to modify this recipe"
+        )
 
     if recipe_data.name is not None:
         recipe.name = recipe_data.name
@@ -166,80 +160,51 @@ async def update_recipe(
     if recipe_data.category_id is not None:
         recipe.category_id = recipe_data.category_id
 
-
-    # --------------------------------------------------------
-    # COMMIT CHANGES
-    # --------------------------------------------------------
-
     await db.commit()
-
-
-    # --------------------------------------------------------
-    # REFRESH RECIPE
-    # --------------------------------------------------------
-
     await db.refresh(recipe)
-
 
     return recipe
 
 
-# ============================================================
+
+
 # DELETE RECIPE
 # DELETE /recipes/{recipe_id}
-# ============================================================
 
 @router.delete(
     "/{recipe_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=status.HTTP_204_NO_CONTENT
 )
 async def delete_recipe(
     recipe_id: int,
     db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    # --------------------------------------------------------
-    # 1. FIND THE RECIPE
-    # --------------------------------------------------------
-
-    statement = select(Recipe).where(
-        Recipe.id == recipe_id
+    result = await db.execute(
+        select(Recipe).where(
+            Recipe.id == recipe_id
+        )
     )
 
-    result = await db.execute(statement)
-
     recipe = result.scalar_one_or_none()
-
-
-    # --------------------------------------------------------
-    # 2. CHECK IF RECIPE EXISTS
-    # --------------------------------------------------------
 
     if recipe is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Recipe not found",
+            detail="Recipe not found"
         )
 
-
-    # --------------------------------------------------------
-    # 3. DELETE THE RECIPE
-    # --------------------------------------------------------
+    if recipe.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to delete this recipe"
+        )
 
     await db.delete(recipe)
-
-
-    # --------------------------------------------------------
-    # 4. COMMIT THE DELETE
-    # --------------------------------------------------------
-
     await db.commit()
 
-
-    # --------------------------------------------------------
-    # 5. RETURN 204 NO CONTENT
-    # --------------------------------------------------------
-
     return None
+
 
 
 @router.post(
@@ -667,3 +632,15 @@ async def get_recipes(
     recipes = result.scalars().unique().all()
 
     return recipes
+
+
+@router.get("/me")
+async def get_my_profile(
+    current_user: User = Depends(get_current_user)
+):
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "is_active": current_user.is_active
+    }
