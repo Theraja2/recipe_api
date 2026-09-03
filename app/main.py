@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 
+from app.routers.recipes import router as recipes_router
+
+
 
 app = FastAPI(
     title="Recipe API",
@@ -11,3 +14,6 @@ app = FastAPI(
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Recipe API"}
+
+
+app.include_router(recipes_router)

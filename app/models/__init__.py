@@ -4,3 +4,15 @@ from app.models.recipe import Recipe
 from app.models.ingredient import Ingredient
 from app.models.recipe_ingredient import RecipeIngredient
 from app.models.recipe_step import RecipeStep
+
+
+
+__all__ = [
+    "RecipeStep",
+    "RecipeIngredient",
+    "Ingredient",
+    "Recipe",
+    "Category",
+    "User",
+    
+]
