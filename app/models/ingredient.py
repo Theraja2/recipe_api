@@ -4,8 +4,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database.base import Base
 
 
-class Category(Base):
-    __tablename__ = "categories"
+class Ingredient(Base):
+    __tablename__ = "ingredients"
 
     id: Mapped[int] = mapped_column(
         primary_key=True,
