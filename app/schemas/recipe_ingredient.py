@@ -22,4 +22,16 @@ class RecipeIngredientResponse(RecipeIngredientBase):
     id: int
     recipe_id: int
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True
+    )
+
+
+class RecipeIngredientDetailResponse(BaseModel):
+    id: int
+    recipe_id: int
+    ingredient_id: int
+    ingredient_name: str
+    amount: float | None = None
+    unit: str | None = None
+    preparation: str | None = None

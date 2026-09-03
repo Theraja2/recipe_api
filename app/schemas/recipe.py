@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -24,6 +25,9 @@ class RecipeUpdate(BaseModel):
 
 class RecipeResponse(RecipeBase):
     id: int
+    created_at: datetime
+    description: Optional[str] = None
+    category_id: int
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
