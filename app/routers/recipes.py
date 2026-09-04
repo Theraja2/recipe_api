@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 
 from typing import Optional
 
 from fastapi import Query
 from sqlalchemy import asc, desc
 
-from sqlalchemy import select
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -58,6 +58,9 @@ async def create_recipe(
         description=recipe_data.description,
         category_id=recipe_data.category_id,
         owner_id=current_user.id,
+        is_public=recipe_data.is_public,
+        prep_minutes=recipe_data.prep_minutes,
+        cook_minutes=recipe_data.cook_minutes,
     )
 
     db.add(recipe)
@@ -66,6 +69,7 @@ async def create_recipe(
     await db.refresh(recipe)
 
     return recipe
+
 
 
 # LIST RECIPES
@@ -160,12 +164,19 @@ async def update_recipe(
     if recipe_data.category_id is not None:
         recipe.category_id = recipe_data.category_id
 
+    if recipe_data.is_public is not None:
+        recipe.is_public = recipe_data.is_public
+
+    if recipe_data.prep_minutes is not None:
+        recipe.prep_minutes = recipe_data.prep_minutes
+
+    if recipe_data.cook_minutes is not None:
+        recipe.cook_minutes = recipe_data.cook_minutes
+
     await db.commit()
     await db.refresh(recipe)
 
     return recipe
-
-
 
 
 # DELETE RECIPE
@@ -644,3 +655,189 @@ async def get_my_profile(
         "email": current_user.email,
         "is_active": current_user.is_active
     }
+
+
+
+@router.get(
+    "",
+    response_model=list[RecipeResponse]
+)
+async def list_recipes(
+    ingredient: list[str] | None = Query(
+        default=None
+    ),
+    db: AsyncSession = Depends(get_session),
+):
+    query = select(Recipe)
+
+    if ingredient:
+        normalized_ingredients = [
+            name.strip().lower()
+            for name in ingredient
+            if name.strip()
+        ]
+
+        if normalized_ingredients:
+            query = (
+                query
+                .join(
+                    RecipeIngredient,
+                    RecipeIngredient.recipe_id == Recipe.id
+                )
+                .join(
+                    Ingredient,
+                    Ingredient.id == RecipeIngredient.ingredient_id
+                )
+                .where(
+                    func.lower(Ingredient.name).in_(
+                        normalized_ingredients
+                    )
+                )
+                .group_by(Recipe.id)
+                .having(
+                    func.count(
+                        func.distinct(Ingredient.id)
+                    ) == len(set(normalized_ingredients))
+                )
+            )
+
+    query = query.order_by(
+        Recipe.id.desc()
+    )
+
+    result = await db.execute(query)
+
+    return result.scalars().all()
+
+
+
+
+@router.get(
+    "/public",
+    response_model=list[RecipeResponse]
+)
+async def get_public_recipes(
+    db: AsyncSession = Depends(get_session),
+):
+    result = await db.execute(
+        select(Recipe)
+        .where(
+            Recipe.is_public.is_(True)
+        )
+        .order_by(
+            Recipe.id.desc()
+        )
+    )
+
+    recipes = result.scalars().all()
+
+    return recipes
+
+
+
+@router.get(
+    "",
+    response_model=list[RecipeResponse]
+)
+async def list_recipes(
+    search: str | None = None,
+    ingredient: list[str] | None = Query(default=None),
+    category: str | None = None,
+
+    max_time: int | None = Query(
+        default=None,
+        ge=0
+    ),
+
+    limit: int = Query(
+        default=20,
+        ge=1,
+        le=100
+    ),
+
+    offset: int = Query(
+        default=0,
+        ge=0
+    ),
+
+    db: AsyncSession = Depends(get_session),
+):
+    query = select(Recipe)
+
+    #  search logic
+    if search:
+        query = query.where(
+            Recipe.name.ilike(
+                f"%{search}%"
+            )
+        )
+
+    #  category logic
+    if category:
+        query = query.join(
+            Category,
+            Category.id == Recipe.category_id
+        ).where(
+            func.lower(Category.name)
+            == category.strip().lower()
+        )
+
+    # multiple ingredient
+    if ingredient:
+        normalized_ingredients = [
+            name.strip().lower()
+            for name in ingredient
+            if name.strip()
+        ]
+
+        unique_ingredients = set(
+            normalized_ingredients
+        )
+
+        if unique_ingredients:
+            query = (
+                query
+                .join(
+                    RecipeIngredient,
+                    RecipeIngredient.recipe_id == Recipe.id
+                )
+                .join(
+                    Ingredient,
+                    Ingredient.id == RecipeIngredient.ingredient_id
+                )
+                .where(
+                    func.lower(Ingredient.name).in_(
+                        unique_ingredients
+                    )
+                )
+                .group_by(Recipe.id)
+                .having(
+                    func.count(
+                        func.distinct(Ingredient.id)
+                    ) == len(unique_ingredients)
+                )
+            )
+
+    
+    if max_time is not None:
+        query = query.where(
+            and_(
+                Recipe.prep_minutes.is_not(None),
+                Recipe.cook_minutes.is_not(None),
+                (
+                    Recipe.prep_minutes
+                    + Recipe.cook_minutes
+                ) <= max_time
+            )
+        )
+
+    query = (
+        query
+        .order_by(Recipe.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    return result.scalars().unique().all()
