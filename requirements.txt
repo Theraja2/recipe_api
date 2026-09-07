@@ -9,3 +9,7 @@ python-multipart
 passlib[bcrypt]
 PyJWT
 email-validator
+pytest
+pytest-asyncio
+httpx
+aiosqlite

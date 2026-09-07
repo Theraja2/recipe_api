@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.recipe_ingredient import RecipeIngredientDetailResponse
+
 
 class RecipeCreate(BaseModel):
     name: str
@@ -49,6 +51,14 @@ class RecipeResponse(BaseModel):
     cook_minutes: int | None
 
     created_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
+
+
+class RecipeDetailResponse(RecipeResponse):
+    ingredients: list[RecipeIngredientDetailResponse] = []
 
     model_config = ConfigDict(
         from_attributes=True

@@ -3,69 +3,74 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.database import get_session
-from app.models.recipe import Recipe
-from app.models.recipe_ingredient import RecipeIngredient
+from app.models.ingredient import Ingredient
+from app.schemas.ingredient import (
+    IngredientCreate,
+    IngredientResponse,
+)
 
 
 router = APIRouter(
-    prefix="/recipes",
-    tags=["Recipe Ingredients"]
+    prefix="/ingredients",
+    tags=["Ingredients"],
 )
 
 
-@router.delete(
-    "/{recipe_id}/ingredients/{recipe_ingredient_id}",
-    status_code=status.HTTP_204_NO_CONTENT
+@router.post(
+    "",
+    response_model=IngredientResponse,
+    status_code=status.HTTP_201_CREATED,
 )
-async def delete_recipe_ingredient(
-    recipe_id: int,
-    recipe_ingredient_id: int,
-    session: AsyncSession = Depends(get_session)
+async def create_ingredient(
+    ingredient_data: IngredientCreate,
+    session: AsyncSession = Depends(get_session),
 ):
-    """
-    Delete an ingredient relationship from a recipe.
-
-    This deletes the RecipeIngredient record only.
-    The global Ingredient remains in the database.
-    """
-
     # ---------------------------------------------------------
-    # 1. Find the RecipeIngredient
+    # 1. Check whether the ingredient already exists
     # ---------------------------------------------------------
 
     result = await session.execute(
-        select(RecipeIngredient).where(
-            RecipeIngredient.id == recipe_ingredient_id,
-            RecipeIngredient.recipe_id == recipe_id
+        select(Ingredient).where(
+            Ingredient.name == ingredient_data.name
         )
     )
 
-    recipe_ingredient = result.scalar_one_or_none()
+    existing_ingredient = result.scalar_one_or_none()
 
     # ---------------------------------------------------------
-    # 2. Check whether the relationship exists
+    # 2. Prevent duplicate ingredients
     # ---------------------------------------------------------
 
-    if recipe_ingredient is None:
+    if existing_ingredient:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Recipe ingredient not found"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ingredient already exists",
         )
 
     # ---------------------------------------------------------
-    # 3. Delete the RecipeIngredient relationship
+    # 3. Create the Ingredient
     # ---------------------------------------------------------
 
-    await session.delete(recipe_ingredient)
+    ingredient = Ingredient(
+        name=ingredient_data.name
+    )
 
     # ---------------------------------------------------------
-    # 4. Save the deletion
+    # 4. Add to database
+    # ---------------------------------------------------------
+
+    session.add(ingredient)
+
+    # ---------------------------------------------------------
+    # 5. Save
     # ---------------------------------------------------------
 
     await session.commit()
 
     # ---------------------------------------------------------
-    # 5. 204 No Content means no response body
+    # 6. Load generated ID
     # ---------------------------------------------------------
 
-    return None
+    await session.refresh(ingredient)
+
+    return ingredient

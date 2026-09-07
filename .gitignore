@@ -1,11 +1,37 @@
+# Virtual environment
+.venv/
 venv/
-__pycache__/
-*.pyc
+env/
 
+# Environment variables
 .env
 
-.pytest_cache/
-.coverage
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
 
-.idea/
+# Pytest
+.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# VS Code
 .vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# Alembic
+# Keep Alembic migration files tracked.

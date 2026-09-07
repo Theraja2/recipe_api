@@ -1,21 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-
 from typing import Optional
 
-from fastapi import Query
-from sqlalchemy import asc, desc
-
-from sqlalchemy import select, func, and_
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import and_, asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.dependencies.auth import get_current_user
-from app.models.user import User
 from app.dependencies.database import get_session
+
 from app.models.category import Category
-from app.models.recipe import Recipe
 from app.models.ingredient import Ingredient
+from app.models.recipe import Recipe
 from app.models.recipe_ingredient import RecipeIngredient
+from app.models.user import User
 
 from app.schemas.recipe import (
     RecipeCreate,
@@ -26,8 +23,8 @@ from app.schemas.recipe import (
 
 from app.schemas.recipe_ingredient import (
     RecipeIngredientCreate,
-    RecipeIngredientResponse,
     RecipeIngredientDetailResponse,
+    RecipeIngredientResponse,
     RecipeIngredientUpdate,
 )
 
@@ -39,20 +36,30 @@ router = APIRouter(
 
 
 # ============================================================
-# CREATE RECIPE
+# 1. CREATE RECIPE
 # POST /recipes
 # ============================================================
 
 @router.post(
     "",
     response_model=RecipeResponse,
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_201_CREATED,
 )
 async def create_recipe(
     recipe_data: RecipeCreate,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
+    # Check whether the category exists
+    category = await db.get(Category, recipe_data.category_id)
+
+    if category is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Category with ID {recipe_data.category_id} does not exist",
+        )
+
+    # Create the recipe
     recipe = Recipe(
         name=recipe_data.name,
         description=recipe_data.description,
@@ -71,9 +78,25 @@ async def create_recipe(
     return recipe
 
 
-
-# LIST RECIPES
+# ============================================================
+# 2. LIST / SEARCH / FILTER / PAGINATE / SORT RECIPES
 # GET /recipes
+#
+# Examples:
+#
+# GET /recipes
+# GET /recipes?search=pasta
+# GET /recipes?ingredient=tomato
+# GET /recipes?ingredient=tomato&ingredient=onion
+# GET /recipes?category=dinner
+# GET /recipes?search=chicken&category=dinner
+# GET /recipes?max_time=60
+# GET /recipes?limit=10&offset=0
+# GET /recipes?sort=name
+# GET /recipes?sort=-name
+# GET /recipes?sort=created_at
+# GET /recipes?sort=-created_at
+# ============================================================
 
 @router.get(
     "",
@@ -81,19 +104,251 @@ async def create_recipe(
     status_code=status.HTTP_200_OK,
 )
 async def list_recipes(
+    search: Optional[str] = Query(
+        default=None,
+        description="Search recipes by name or description",
+    ),
+    ingredient: list[str] | None = Query(
+        default=None,
+        description="Filter by one or more ingredient names",
+    ),
+    category: Optional[str] = Query(
+        default=None,
+        description="Filter by category name",
+    ),
+    max_time: int | None = Query(
+        default=None,
+        ge=0,
+        description="Maximum total preparation + cooking time",
+    ),
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=100,
+        description="Number of recipes to return",
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Number of recipes to skip",
+    ),
+    sort: Optional[str] = Query(
+        default=None,
+        description=(
+            "Sort by name or created_at. "
+            "Use - for descending order."
+        ),
+    ),
     db: AsyncSession = Depends(get_session),
 ):
-    statement = select(Recipe)
+    """
+    List recipes with:
 
-    result = await db.execute(statement)
+    - Search by recipe name or description
+    - Filter by one or more ingredients
+    - Filter by category
+    - Filter by maximum preparation + cooking time
+    - Pagination using limit and offset
+    - Sorting by name or created_at
+    """
+
+    query = select(Recipe)
+
+    # --------------------------------------------------------
+    # SEARCH BY NAME OR DESCRIPTION
+    # --------------------------------------------------------
+
+    if search:
+        search_term = f"%{search.strip()}%"
+
+        query = query.where(
+            Recipe.name.ilike(search_term)
+            | Recipe.description.ilike(search_term)
+        )
+
+    # --------------------------------------------------------
+    # FILTER BY CATEGORY
+    # --------------------------------------------------------
+
+    if category:
+        category_term = category.strip().lower()
+
+        query = (
+            query
+            .join(
+                Category,
+                Category.id == Recipe.category_id,
+            )
+            .where(
+                func.lower(Category.name) == category_term
+            )
+        )
+
+    # --------------------------------------------------------
+    # FILTER BY ONE OR MORE INGREDIENTS
+    # --------------------------------------------------------
+
+    if ingredient:
+        normalized_ingredients = {
+            name.strip().lower()
+            for name in ingredient
+            if name.strip()
+        }
+
+        if normalized_ingredients:
+            query = (
+                query
+                .join(
+                    RecipeIngredient,
+                    RecipeIngredient.recipe_id == Recipe.id,
+                )
+                .join(
+                    Ingredient,
+                    Ingredient.id == RecipeIngredient.ingredient_id,
+                )
+                .where(
+                    func.lower(Ingredient.name).in_(
+                        normalized_ingredients
+                    )
+                )
+                .group_by(Recipe.id)
+                .having(
+                    func.count(
+                        func.distinct(Ingredient.id)
+                    ) == len(normalized_ingredients)
+                )
+            )
+
+    # --------------------------------------------------------
+    # FILTER BY MAXIMUM TOTAL COOKING TIME
+    # --------------------------------------------------------
+
+    if max_time is not None:
+        query = query.where(
+            and_(
+                Recipe.prep_minutes.is_not(None),
+                Recipe.cook_minutes.is_not(None),
+                (
+                    Recipe.prep_minutes
+                    + Recipe.cook_minutes
+                ) <= max_time,
+            )
+        )
+
+    # --------------------------------------------------------
+    # SORTING
+    # --------------------------------------------------------
+
+    if sort == "name":
+        query = query.order_by(
+            asc(Recipe.name)
+        )
+
+    elif sort == "-name":
+        query = query.order_by(
+            desc(Recipe.name)
+        )
+
+    elif sort == "created_at":
+        query = query.order_by(
+            asc(Recipe.created_at)
+        )
+
+    elif sort == "-created_at":
+        query = query.order_by(
+            desc(Recipe.created_at)
+        )
+
+    else:
+        # Default sorting
+        query = query.order_by(
+            asc(Recipe.id)
+        )
+
+    # --------------------------------------------------------
+    # PAGINATION
+    # --------------------------------------------------------
+
+    query = (
+        query
+        .limit(limit)
+        .offset(offset)
+    )
+
+    # --------------------------------------------------------
+    # EXECUTE QUERY
+    # --------------------------------------------------------
+
+    result = await db.execute(query)
+
+    # --------------------------------------------------------
+    # RETURN UNIQUE RECIPES
+    # --------------------------------------------------------
+
+    recipes = result.scalars().unique().all()
+
+    return recipes
+
+
+# ============================================================
+# 3. GET CURRENT USER PROFILE
+# GET /recipes/me
+# ============================================================
+
+@router.get(
+    "/mine",
+    response_model=list[RecipeResponse],
+)
+async def get_my_recipes(
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Recipe)
+        .where(
+            Recipe.owner_id == current_user.id
+        )
+        .order_by(
+            Recipe.created_at.desc()
+        )
+    )
 
     recipes = result.scalars().all()
 
     return recipes
 
 
-# GET ONE RECIPE
+# ============================================================
+# 4. GET PUBLIC RECIPES
+# GET /recipes/public
+# ============================================================
+
+@router.get(
+    "/public",
+    response_model=list[RecipeResponse],
+)
+async def get_public_recipes(
+    db: AsyncSession = Depends(get_session),
+):
+    result = await db.execute(
+        select(Recipe)
+        .where(
+            Recipe.is_public.is_(True)
+        )
+        .order_by(
+            Recipe.id.desc()
+        )
+    )
+
+    recipes = result.scalars().all()
+
+    return recipes
+
+
+# ============================================================
+# 5. GET ONE RECIPE
 # GET /recipes/{recipe_id}
+# ============================================================
 
 @router.get(
     "/{recipe_id}",
@@ -109,25 +364,30 @@ async def get_recipe(
             selectinload(Recipe.ingredients),
             selectinload(Recipe.steps),
         )
-        .where(Recipe.id == recipe_id)
+        .where(
+            Recipe.id == recipe_id
+        )
     )
 
     recipe = result.scalar_one_or_none()
 
     if recipe is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Recipe not found",
         )
 
     return recipe
 
 
-
+# ============================================================
+# 6. UPDATE RECIPE
+# PUT /recipes/{recipe_id}
+# ============================================================
 
 @router.put(
     "/{recipe_id}",
-    response_model=RecipeResponse
+    response_model=RecipeResponse,
 )
 async def update_recipe(
     recipe_id: int,
@@ -146,14 +406,22 @@ async def update_recipe(
     if recipe is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Recipe not found"
+            detail="Recipe not found",
         )
+
+    # --------------------------------------------------------
+    # OWNERSHIP CHECK
+    # --------------------------------------------------------
 
     if recipe.owner_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to modify this recipe"
+            detail="You do not have permission to modify this recipe",
         )
+
+    # --------------------------------------------------------
+    # UPDATE PROVIDED FIELDS
+    # --------------------------------------------------------
 
     if recipe_data.name is not None:
         recipe.name = recipe_data.name
@@ -179,12 +447,14 @@ async def update_recipe(
     return recipe
 
 
-# DELETE RECIPE
+# ============================================================
+# 7. DELETE RECIPE
 # DELETE /recipes/{recipe_id}
+# ============================================================
 
 @router.delete(
     "/{recipe_id}",
-    status_code=status.HTTP_204_NO_CONTENT
+    status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_recipe(
     recipe_id: int,
@@ -202,13 +472,17 @@ async def delete_recipe(
     if recipe is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Recipe not found"
+            detail="Recipe not found",
         )
+
+    # --------------------------------------------------------
+    # OWNERSHIP CHECK
+    # --------------------------------------------------------
 
     if recipe.owner_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to delete this recipe"
+            detail="You do not have permission to delete this recipe",
         )
 
     await db.delete(recipe)
@@ -217,6 +491,10 @@ async def delete_recipe(
     return None
 
 
+# ============================================================
+# 8. ADD INGREDIENT TO RECIPE
+# POST /recipes/{recipe_id}/ingredients
+# ============================================================
 
 @router.post(
     "/{recipe_id}/ingredients",
@@ -229,14 +507,14 @@ async def add_ingredient_to_recipe(
     db: AsyncSession = Depends(get_session),
 ):
     # --------------------------------------------------------
-    # 1. FIND THE RECIPE
+    # CHECK RECIPE
     # --------------------------------------------------------
 
-    recipe_statement = select(Recipe).where(
-        Recipe.id == recipe_id
+    recipe_result = await db.execute(
+        select(Recipe).where(
+            Recipe.id == recipe_id
+        )
     )
-
-    recipe_result = await db.execute(recipe_statement)
 
     recipe = recipe_result.scalar_one_or_none()
 
@@ -246,17 +524,14 @@ async def add_ingredient_to_recipe(
             detail="Recipe not found",
         )
 
-
     # --------------------------------------------------------
-    # 2. FIND THE INGREDIENT
+    # CHECK INGREDIENT
     # --------------------------------------------------------
-
-    ingredient_statement = select(Ingredient).where(
-        Ingredient.id == ingredient_data.ingredient_id
-    )
 
     ingredient_result = await db.execute(
-        ingredient_statement
+        select(Ingredient).where(
+            Ingredient.id == ingredient_data.ingredient_id
+        )
     )
 
     ingredient = ingredient_result.scalar_one_or_none()
@@ -267,9 +542,8 @@ async def add_ingredient_to_recipe(
             detail="Ingredient not found",
         )
 
-
     # --------------------------------------------------------
-    # 3. CREATE RECIPE-INGREDIENT ASSOCIATION
+    # CREATE RELATIONSHIP
     # --------------------------------------------------------
 
     recipe_ingredient = RecipeIngredient(
@@ -280,38 +554,16 @@ async def add_ingredient_to_recipe(
         preparation=ingredient_data.preparation,
     )
 
-
-    # --------------------------------------------------------
-    # 4. ADD TO DATABASE SESSION
-    # --------------------------------------------------------
-
     db.add(recipe_ingredient)
 
-
-    # --------------------------------------------------------
-    # 5. COMMIT
-    # --------------------------------------------------------
-
     await db.commit()
-
-
-    # --------------------------------------------------------
-    # 6. REFRESH
-    # --------------------------------------------------------
-
     await db.refresh(recipe_ingredient)
-
-
-    # --------------------------------------------------------
-    # 7. RETURN CREATED ASSOCIATION
-    # --------------------------------------------------------
 
     return recipe_ingredient
 
 
-
 # ============================================================
-# LIST RECIPE INGREDIENTS
+# 9. LIST RECIPE INGREDIENTS
 # GET /recipes/{recipe_id}/ingredients
 # ============================================================
 
@@ -325,15 +577,13 @@ async def list_recipe_ingredients(
     db: AsyncSession = Depends(get_session),
 ):
     # --------------------------------------------------------
-    # 1. CHECK THAT RECIPE EXISTS
+    # CHECK RECIPE
     # --------------------------------------------------------
 
-    recipe_statement = select(Recipe).where(
-        Recipe.id == recipe_id
-    )
-
     recipe_result = await db.execute(
-        recipe_statement
+        select(Recipe).where(
+            Recipe.id == recipe_id
+        )
     )
 
     recipe = recipe_result.scalar_one_or_none()
@@ -344,70 +594,58 @@ async def list_recipe_ingredients(
             detail="Recipe not found",
         )
 
-
     # --------------------------------------------------------
-    # 2. JOIN RECIPE INGREDIENT WITH INGREDIENT
+    # GET INGREDIENTS WITH NAMES
     # --------------------------------------------------------
 
     statement = (
         select(
-            RecipeIngredient,
-            Ingredient.name,
+            RecipeIngredient.id,
+            RecipeIngredient.recipe_id,
+            RecipeIngredient.ingredient_id,
+            Ingredient.name.label("ingredient_name"),
+            RecipeIngredient.amount,
+            RecipeIngredient.unit,
+            RecipeIngredient.preparation,
         )
         .join(
             Ingredient,
-            RecipeIngredient.ingredient_id == Ingredient.id,
+            Ingredient.id == RecipeIngredient.ingredient_id,
         )
         .where(
             RecipeIngredient.recipe_id == recipe_id
         )
+        .order_by(
+            RecipeIngredient.id
+        )
     )
-
-
-    # --------------------------------------------------------
-    # 3. EXECUTE QUERY
-    # --------------------------------------------------------
 
     result = await db.execute(statement)
 
+    rows = result.all()
 
-    # --------------------------------------------------------
-    # 4. BUILD RESPONSE
-    # --------------------------------------------------------
-
-    recipe_ingredients = []
-
-    for recipe_ingredient, ingredient_name in result.all():
-
-        recipe_ingredients.append(
-            RecipeIngredientDetailResponse(
-                id=recipe_ingredient.id,
-                recipe_id=recipe_ingredient.recipe_id,
-                ingredient_id=recipe_ingredient.ingredient_id,
-                ingredient_name=ingredient_name,
-                amount=recipe_ingredient.amount,
-                unit=recipe_ingredient.unit,
-                preparation=recipe_ingredient.preparation,
-            )
-        )
-
-
-    # --------------------------------------------------------
-    # 5. RETURN INGREDIENTS
-    # --------------------------------------------------------
-
-    return recipe_ingredients
+    return [
+        {
+            "id": row.id,
+            "recipe_id": row.recipe_id,
+            "ingredient_id": row.ingredient_id,
+            "ingredient_name": row.ingredient_name,
+            "amount": row.amount,
+            "unit": row.unit,
+            "preparation": row.preparation,
+        }
+        for row in rows
+    ]
 
 
 # ============================================================
-# UPDATE RECIPE INGREDIENT
+# 10. UPDATE RECIPE INGREDIENT
 # PUT /recipes/{recipe_id}/ingredients/{recipe_ingredient_id}
 # ============================================================
 
 @router.put(
     "/{recipe_id}/ingredients/{recipe_ingredient_id}",
     response_model=RecipeIngredientResponse,
-    status_code=status.HTTP_200_OK,
 )
 async def update_recipe_ingredient(
     recipe_id: int,
@@ -415,23 +653,14 @@ async def update_recipe_ingredient(
     ingredient_data: RecipeIngredientUpdate,
     db: AsyncSession = Depends(get_session),
 ):
-    # --------------------------------------------------------
-    # 1. FIND RECIPE INGREDIENT
-    # --------------------------------------------------------
-
-    statement = select(RecipeIngredient).where(
-        RecipeIngredient.id == recipe_ingredient_id,
-        RecipeIngredient.recipe_id == recipe_id,
+    result = await db.execute(
+        select(RecipeIngredient).where(
+            RecipeIngredient.id == recipe_ingredient_id,
+            RecipeIngredient.recipe_id == recipe_id,
+        )
     )
 
-    result = await db.execute(statement)
-
     recipe_ingredient = result.scalar_one_or_none()
-
-
-    # --------------------------------------------------------
-    # 2. CHECK IF RELATIONSHIP EXISTS
-    # --------------------------------------------------------
 
     if recipe_ingredient is None:
         raise HTTPException(
@@ -439,405 +668,58 @@ async def update_recipe_ingredient(
             detail="Recipe ingredient not found",
         )
 
-
     # --------------------------------------------------------
-    # 3. UPDATE AMOUNT
+    # UPDATE FIELDS
     # --------------------------------------------------------
 
     if ingredient_data.amount is not None:
         recipe_ingredient.amount = ingredient_data.amount
 
-
-    # --------------------------------------------------------
-    # 4. UPDATE UNIT
-    # --------------------------------------------------------
-
     if ingredient_data.unit is not None:
         recipe_ingredient.unit = ingredient_data.unit
-
-
-    # --------------------------------------------------------
-    # 5. UPDATE PREPARATION
-    # --------------------------------------------------------
 
     if ingredient_data.preparation is not None:
         recipe_ingredient.preparation = (
             ingredient_data.preparation
         )
 
-
-    # --------------------------------------------------------
-    # 6. COMMIT CHANGES
-    # --------------------------------------------------------
-
     await db.commit()
-
-
-    # --------------------------------------------------------
-    # 7. REFRESH
-    # --------------------------------------------------------
-
     await db.refresh(recipe_ingredient)
-
-
-    # --------------------------------------------------------
-    # 8. RETURN UPDATED RECORD
-    # --------------------------------------------------------
 
     return recipe_ingredient
 
 
+# ============================================================
+# 11. DELETE RECIPE INGREDIENT
+# DELETE /recipes/{recipe_id}/ingredients/{recipe_ingredient_id}
+# ============================================================
 
-@router.get(
-    "",
-    response_model=list[RecipeResponse]
+@router.delete(
+    "/{recipe_id}/ingredients/{recipe_ingredient_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
 )
-async def get_recipes(
-    search: Optional[str] = Query(
-        default=None,
-        description="Search recipes by name or description"
-    ),
-
-    ingredient: Optional[str] = Query(
-        default=None,
-        description="Filter recipes by ingredient name"
-    ),
-
-    category: Optional[str] = Query(
-        default=None,
-        description="Filter recipes by category name"
-    ),
-
-    limit: int = Query(
-        default=10,
-        ge=1,
-        le=100,
-        description="Number of recipes to return"
-    ),
-
-    offset: int = Query(
-        default=0,
-        ge=0,
-        description="Number of recipes to skip"
-    ),
-
-    sort: Optional[str] = Query(
-        default=None,
-        description="Sort by name or created_at. Use - for descending order."
-    ),
-
-    session: AsyncSession = Depends(get_session)
-):
-    """
-    List recipes with:
-
-    - search
-    - ingredient filtering
-    - category filtering
-    - pagination
-    - sorting
-    """
-
-    # ---------------------------------------------------------
-    # START WITH THE RECIPE TABLE
-    # ---------------------------------------------------------
-
-    query = select(Recipe)
-
-    # ---------------------------------------------------------
-    # SEARCH BY RECIPE NAME OR DESCRIPTION
-    # ---------------------------------------------------------
-
-    if search:
-        search_term = f"%{search}%"
-
-        query = query.where(
-            Recipe.name.ilike(search_term)
-            | Recipe.description.ilike(search_term)
-        )
-
-    # ---------------------------------------------------------
-    # FILTER BY INGREDIENT
-    # ---------------------------------------------------------
-
-    if ingredient:
-        query = (
-            query
-            .join(
-                RecipeIngredient,
-                RecipeIngredient.recipe_id == Recipe.id
-            )
-            .join(
-                Ingredient,
-                Ingredient.id == RecipeIngredient.ingredient_id
-            )
-            .where(
-                Ingredient.name.ilike(f"%{ingredient}%")
-            )
-        )
-
-    # ---------------------------------------------------------
-    # FILTER BY CATEGORY
-    # ---------------------------------------------------------
-
-    if category:
-        query = (
-            query
-            .join(
-                Category,
-                Category.id == Recipe.category_id
-            )
-            .where(
-                Category.name.ilike(f"%{category}%")
-            )
-        )
-
-    # ---------------------------------------------------------
-    # SORTING
-    # ---------------------------------------------------------
-
-    if sort:
-
-        if sort == "name":
-            query = query.order_by(
-                asc(Recipe.name)
-            )
-
-        elif sort == "-name":
-            query = query.order_by(
-                desc(Recipe.name)
-            )
-
-        elif sort == "created_at":
-            query = query.order_by(
-                asc(Recipe.created_at)
-            )
-
-        elif sort == "-created_at":
-            query = query.order_by(
-                desc(Recipe.created_at)
-            )
-
-    else:
-        # Default sorting
-        query = query.order_by(
-            asc(Recipe.id)
-        )
-
-    # ---------------------------------------------------------
-    # PAGINATION
-    # ---------------------------------------------------------
-
-    query = query.limit(limit).offset(offset)
-
-    # ---------------------------------------------------------
-    # EXECUTE ASYNC QUERY
-    # ---------------------------------------------------------
-
-    result = await session.execute(query)
-
-    # ---------------------------------------------------------
-    # GET RECIPE OBJECTS
-    # ---------------------------------------------------------
-
-    recipes = result.scalars().unique().all()
-
-    return recipes
-
-
-@router.get("/me")
-async def get_my_profile(
-    current_user: User = Depends(get_current_user)
-):
-    return {
-        "id": current_user.id,
-        "username": current_user.username,
-        "email": current_user.email,
-        "is_active": current_user.is_active
-    }
-
-
-
-@router.get(
-    "",
-    response_model=list[RecipeResponse]
-)
-async def list_recipes(
-    ingredient: list[str] | None = Query(
-        default=None
-    ),
-    db: AsyncSession = Depends(get_session),
-):
-    query = select(Recipe)
-
-    if ingredient:
-        normalized_ingredients = [
-            name.strip().lower()
-            for name in ingredient
-            if name.strip()
-        ]
-
-        if normalized_ingredients:
-            query = (
-                query
-                .join(
-                    RecipeIngredient,
-                    RecipeIngredient.recipe_id == Recipe.id
-                )
-                .join(
-                    Ingredient,
-                    Ingredient.id == RecipeIngredient.ingredient_id
-                )
-                .where(
-                    func.lower(Ingredient.name).in_(
-                        normalized_ingredients
-                    )
-                )
-                .group_by(Recipe.id)
-                .having(
-                    func.count(
-                        func.distinct(Ingredient.id)
-                    ) == len(set(normalized_ingredients))
-                )
-            )
-
-    query = query.order_by(
-        Recipe.id.desc()
-    )
-
-    result = await db.execute(query)
-
-    return result.scalars().all()
-
-
-
-
-@router.get(
-    "/public",
-    response_model=list[RecipeResponse]
-)
-async def get_public_recipes(
+async def delete_recipe_ingredient(
+    recipe_id: int,
+    recipe_ingredient_id: int,
     db: AsyncSession = Depends(get_session),
 ):
     result = await db.execute(
-        select(Recipe)
-        .where(
-            Recipe.is_public.is_(True)
-        )
-        .order_by(
-            Recipe.id.desc()
+        select(RecipeIngredient).where(
+            RecipeIngredient.id == recipe_ingredient_id,
+            RecipeIngredient.recipe_id == recipe_id,
         )
     )
 
-    recipes = result.scalars().all()
+    recipe_ingredient = result.scalar_one_or_none()
 
-    return recipes
-
-
-
-@router.get(
-    "",
-    response_model=list[RecipeResponse]
-)
-async def list_recipes(
-    search: str | None = None,
-    ingredient: list[str] | None = Query(default=None),
-    category: str | None = None,
-
-    max_time: int | None = Query(
-        default=None,
-        ge=0
-    ),
-
-    limit: int = Query(
-        default=20,
-        ge=1,
-        le=100
-    ),
-
-    offset: int = Query(
-        default=0,
-        ge=0
-    ),
-
-    db: AsyncSession = Depends(get_session),
-):
-    query = select(Recipe)
-
-    #  search logic
-    if search:
-        query = query.where(
-            Recipe.name.ilike(
-                f"%{search}%"
-            )
+    if recipe_ingredient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recipe ingredient not found",
         )
 
-    #  category logic
-    if category:
-        query = query.join(
-            Category,
-            Category.id == Recipe.category_id
-        ).where(
-            func.lower(Category.name)
-            == category.strip().lower()
-        )
+    await db.delete(recipe_ingredient)
+    await db.commit()
 
-    # multiple ingredient
-    if ingredient:
-        normalized_ingredients = [
-            name.strip().lower()
-            for name in ingredient
-            if name.strip()
-        ]
+    return None
 
-        unique_ingredients = set(
-            normalized_ingredients
-        )
-
-        if unique_ingredients:
-            query = (
-                query
-                .join(
-                    RecipeIngredient,
-                    RecipeIngredient.recipe_id == Recipe.id
-                )
-                .join(
-                    Ingredient,
-                    Ingredient.id == RecipeIngredient.ingredient_id
-                )
-                .where(
-                    func.lower(Ingredient.name).in_(
-                        unique_ingredients
-                    )
-                )
-                .group_by(Recipe.id)
-                .having(
-                    func.count(
-                        func.distinct(Ingredient.id)
-                    ) == len(unique_ingredients)
-                )
-            )
-
-    
-    if max_time is not None:
-        query = query.where(
-            and_(
-                Recipe.prep_minutes.is_not(None),
-                Recipe.cook_minutes.is_not(None),
-                (
-                    Recipe.prep_minutes
-                    + Recipe.cook_minutes
-                ) <= max_time
-            )
-        )
-
-    query = (
-        query
-        .order_by(Recipe.id.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-
-    result = await db.execute(query)
-
-    return result.scalars().unique().all()
