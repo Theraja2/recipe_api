@@ -4,6 +4,10 @@ from app.models.ingredient import Ingredient
 from tests.conftest import TestSessionLocal
 
 
+# ============================================================
+# HELPER: CREATE USER AND LOGIN
+# ============================================================
+
 async def create_test_user_and_login(client):
     user_data = {
         "username": "recipeingredientuser",
@@ -37,16 +41,20 @@ async def create_test_user_and_login(client):
     return data["access_token"]
 
 
+# ============================================================
+# HELPER: CREATE CATEGORY
+# ============================================================
+
 async def create_test_category(client, token):
     response = await client.post(
-    "/categories",
-    json={
-        "name": "Breakfast",
-    },
-    headers={
-        "Authorization": f"Bearer {token}",
-    },
-)
+        "/categories",
+        json={
+            "name": "Breakfast",
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
+    )
 
     assert response.status_code == 201
 
@@ -56,6 +64,10 @@ async def create_test_category(client, token):
 
     return data["id"]
 
+
+# ============================================================
+# HELPER: CREATE RECIPE
+# ============================================================
 
 async def create_test_recipe(client, token, category_id):
     recipe_data = {
@@ -84,6 +96,10 @@ async def create_test_recipe(client, token, category_id):
     return data["id"]
 
 
+# ============================================================
+# HELPER: CREATE INGREDIENT
+# ============================================================
+
 async def create_test_ingredient():
     async with TestSessionLocal() as session:
         ingredient = Ingredient(
@@ -98,8 +114,13 @@ async def create_test_ingredient():
         return ingredient.id
 
 
+# ============================================================
+# TEST 1: ADD RECIPE INGREDIENT
+# ============================================================
+
 @pytest.mark.asyncio
 async def test_add_recipe_ingredient(client):
+
     token = await create_test_user_and_login(client)
 
     category_id = await create_test_category(
@@ -123,6 +144,9 @@ async def test_add_recipe_ingredient(client):
             "unit": "cups",
             "preparation": "washed",
         },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert response.status_code == 201
@@ -137,8 +161,13 @@ async def test_add_recipe_ingredient(client):
     assert data["preparation"] == "washed"
 
 
+# ============================================================
+# TEST 2: LIST RECIPE INGREDIENTS
+# ============================================================
+
 @pytest.mark.asyncio
 async def test_list_recipe_ingredients(client):
+
     token = await create_test_user_and_login(client)
 
     category_id = await create_test_category(
@@ -163,13 +192,19 @@ async def test_list_recipe_ingredients(client):
             "unit": "cups",
             "preparation": "washed",
         },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert add_response.status_code == 201
 
     # Get recipe ingredients
     response = await client.get(
-        f"/recipes/{recipe_id}/ingredients"
+        f"/recipes/{recipe_id}/ingredients",
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert response.status_code == 200
@@ -189,8 +224,13 @@ async def test_list_recipe_ingredients(client):
     assert ingredient["preparation"] == "washed"
 
 
+# ============================================================
+# TEST 3: UPDATE RECIPE INGREDIENT
+# ============================================================
+
 @pytest.mark.asyncio
 async def test_update_recipe_ingredient(client):
+
     token = await create_test_user_and_login(client)
 
     category_id = await create_test_category(
@@ -214,6 +254,9 @@ async def test_update_recipe_ingredient(client):
             "amount": 2,
             "unit": "cups",
             "preparation": "washed",
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
         },
     )
 
@@ -231,6 +274,9 @@ async def test_update_recipe_ingredient(client):
             "unit": "tablespoons",
             "preparation": "finely washed",
         },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert response.status_code == 200
@@ -245,8 +291,13 @@ async def test_update_recipe_ingredient(client):
     assert data["preparation"] == "finely washed"
 
 
+# ============================================================
+# TEST 4: DELETE RECIPE INGREDIENT
+# ============================================================
+
 @pytest.mark.asyncio
 async def test_delete_recipe_ingredient(client):
+
     token = await create_test_user_and_login(client)
 
     category_id = await create_test_category(
@@ -271,6 +322,9 @@ async def test_delete_recipe_ingredient(client):
             "unit": "cups",
             "preparation": "washed",
         },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert add_response.status_code == 201
@@ -279,14 +333,20 @@ async def test_delete_recipe_ingredient(client):
 
     # Delete relationship
     response = await client.delete(
-        f"/recipes/{recipe_id}/ingredients/{recipe_ingredient_id}"
+        f"/recipes/{recipe_id}/ingredients/{recipe_ingredient_id}",
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert response.status_code == 204
 
     # Verify that the relationship no longer exists
     get_response = await client.get(
-        f"/recipes/{recipe_id}/ingredients"
+        f"/recipes/{recipe_id}/ingredients",
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert get_response.status_code == 200
@@ -296,8 +356,13 @@ async def test_delete_recipe_ingredient(client):
     assert data == []
 
 
+# ============================================================
+# TEST 5: DELETE NONEXISTENT RECIPE INGREDIENT
+# ============================================================
+
 @pytest.mark.asyncio
 async def test_delete_nonexistent_recipe_ingredient(client):
+
     token = await create_test_user_and_login(client)
 
     category_id = await create_test_category(
@@ -312,7 +377,10 @@ async def test_delete_nonexistent_recipe_ingredient(client):
     )
 
     response = await client.delete(
-        f"/recipes/{recipe_id}/ingredients/99999"
+        f"/recipes/{recipe_id}/ingredients/99999",
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert response.status_code == 404

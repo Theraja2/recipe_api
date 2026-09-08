@@ -15,6 +15,7 @@ async def create_test_user_and_login(client, username, email):
         "password": "Password123!",
     }
 
+    # Register
     register_response = await client.post(
         "/auth/register",
         json=user_data,
@@ -22,6 +23,7 @@ async def create_test_user_and_login(client, username, email):
 
     assert register_response.status_code in (200, 201)
 
+    # Login
     login_response = await client.post(
         "/auth/login",
         data={
@@ -42,6 +44,7 @@ async def create_test_user_and_login(client, username, email):
 # ============================================================
 # HELPER: CREATE CATEGORY
 # ============================================================
+
 async def create_test_category(client, token, category_name):
     response = await client.post(
         "/categories",
@@ -56,7 +59,6 @@ async def create_test_category(client, token, category_name):
     assert response.status_code == 201
 
     return response.json()["id"]
-
 
 
 # ============================================================
@@ -102,12 +104,13 @@ async def create_test_recipe(
 
 async def create_test_ingredient(name):
     async with TestSessionLocal() as session:
-        ingredient = Ingredient(name=name)
+        ingredient = Ingredient(
+            name=name
+        )
 
         session.add(ingredient)
 
         await session.commit()
-
         await session.refresh(ingredient)
 
         return ingredient.id
@@ -119,6 +122,7 @@ async def create_test_ingredient(name):
 
 async def add_ingredient_to_recipe(
     client,
+    token,
     recipe_id,
     ingredient_id,
 ):
@@ -129,6 +133,9 @@ async def add_ingredient_to_recipe(
             "amount": 2,
             "unit": "cups",
             "preparation": "washed",
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
         },
     )
 
@@ -174,6 +181,9 @@ async def test_search_recipes_by_name(client):
         "/recipes",
         params={
             "search": "Jollof",
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
         },
     )
 
@@ -225,6 +235,9 @@ async def test_search_recipes_by_description(client):
         params={
             "search": "tomatoes",
         },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert response.status_code == 200
@@ -271,17 +284,18 @@ async def test_filter_recipes_by_ingredient(client):
     )
 
     rice_id = await create_test_ingredient("Rice")
-
     chicken_id = await create_test_ingredient("Chicken")
 
     await add_ingredient_to_recipe(
         client,
+        token,
         rice_recipe_id,
         rice_id,
     )
 
     await add_ingredient_to_recipe(
         client,
+        token,
         chicken_recipe_id,
         chicken_id,
     )
@@ -290,6 +304,9 @@ async def test_filter_recipes_by_ingredient(client):
         "/recipes",
         params={
             "ingredient": "Rice",
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
         },
     )
 
@@ -347,6 +364,9 @@ async def test_filter_recipes_by_category(client):
         params={
             "category": "Dinner",
         },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert response.status_code == 200
@@ -403,6 +423,9 @@ async def test_search_and_category_together(client):
         params={
             "search": "Chicken",
             "category": "Dinner",
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
         },
     )
 
@@ -462,6 +485,9 @@ async def test_recipe_pagination_limit(client):
         params={
             "limit": 2,
         },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert response.status_code == 200
@@ -520,6 +546,9 @@ async def test_recipe_pagination_offset(client):
             "limit": 2,
             "offset": 1,
         },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
     )
 
     assert response.status_code == 200
@@ -568,6 +597,9 @@ async def test_sort_recipes_by_name_ascending(client):
         "/recipes",
         params={
             "sort": "name",
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
         },
     )
 
@@ -618,6 +650,9 @@ async def test_sort_recipes_by_name_descending(client):
         "/recipes",
         params={
             "sort": "-name",
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
         },
     )
 

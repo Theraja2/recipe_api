@@ -145,17 +145,17 @@ async def list_recipes(
     - Sorting by name or created_at
     """
 
-    # ========================================================
+
     # START WITH CURRENT USER'S RECIPES ONLY
-    # ========================================================
+    
 
     query = select(Recipe).where(
         Recipe.owner_id == current_user.id
     )
 
-    # ========================================================
+    
     # SEARCH BY NAME OR DESCRIPTION
-    # ========================================================
+    
 
     if search:
         search_term = f"%{search.strip()}%"
@@ -165,9 +165,9 @@ async def list_recipes(
             | Recipe.description.ilike(search_term)
         )
 
-    # ========================================================
+
     # FILTER BY CATEGORY
-    # ========================================================
+
 
     if category:
         category_term = category.strip().lower()
@@ -183,9 +183,9 @@ async def list_recipes(
             )
         )
 
-    # ========================================================
+    
     # FILTER BY ONE OR MORE INGREDIENTS
-    # ========================================================
+    
 
     if ingredient:
         normalized_ingredients = {
@@ -219,10 +219,8 @@ async def list_recipes(
                 )
             )
 
-    # ========================================================
+    
     # FILTER BY MAXIMUM TOTAL RECIPE TIME
-    # ========================================================
-
     if max_time is not None:
         query = query.where(
             and_(
@@ -235,10 +233,8 @@ async def list_recipes(
             )
         )
 
-    # ========================================================
+    
     # SORTING
-    # ========================================================
-
     if sort == "name":
         query = query.order_by(
             asc(Recipe.name)
@@ -265,26 +261,17 @@ async def list_recipes(
             asc(Recipe.id)
         )
 
-    # ========================================================
+    
     # PAGINATION
-    # ========================================================
-
     query = (
         query
         .limit(limit)
         .offset(offset)
     )
 
-    # ========================================================
     # EXECUTE QUERY
-    # ========================================================
-
     result = await db.execute(query)
-
-    # ========================================================
     # RETURN UNIQUE RECIPES
-    # ========================================================
-
     recipes = result.scalars().unique().all()
 
     return recipes
@@ -364,10 +351,8 @@ async def get_recipe(
     - A user cannot view another user's private recipe.
     """
 
-    # --------------------------------------------------------
+    
     # GET RECIPE
-    # --------------------------------------------------------
-
     result = await db.execute(
         select(Recipe)
         .options(
@@ -381,9 +366,9 @@ async def get_recipe(
 
     recipe = result.scalar_one_or_none()
 
-    # --------------------------------------------------------
+    
     # CHECK WHETHER RECIPE EXISTS
-    # --------------------------------------------------------
+    
 
     if recipe is None:
         raise HTTPException(
@@ -391,10 +376,10 @@ async def get_recipe(
             detail="Recipe not found",
         )
 
-    # --------------------------------------------------------
-    # CHECK OWNERSHIP / PUBLIC ACCESS
-    # --------------------------------------------------------
 
+
+    # CHECK OWNERSHIP / PUBLIC ACCESS
+    
     if (
         recipe.owner_id != current_user.id
         and not recipe.is_public
@@ -404,10 +389,8 @@ async def get_recipe(
             detail="You do not have permission to view this recipe",
         )
 
-    # --------------------------------------------------------
+    
     # RETURN RECIPE
-    # --------------------------------------------------------
-
     return recipe
 
 
@@ -452,9 +435,9 @@ async def update_recipe(
             detail="You do not have permission to modify this recipe",
         )
 
-    # --------------------------------------------------------
+    
     # UPDATE PROVIDED RECIPE FIELDS
-    # --------------------------------------------------------
+    
 
     if recipe_data.name is not None:
         recipe.name = recipe_data.name
@@ -474,9 +457,8 @@ async def update_recipe(
     if recipe_data.cook_minutes is not None:
         recipe.cook_minutes = recipe_data.cook_minutes
 
-    # --------------------------------------------------------
-    # UPDATE RECIPE STEPS
-    # --------------------------------------------------------
+    
+    # UPDATE RECIPE STEP
 
     if recipe_data.steps is not None:
 
@@ -525,10 +507,8 @@ async def delete_recipe(
             detail="Recipe not found",
         )
 
-    # --------------------------------------------------------
+    
     # OWNERSHIP CHECK
-    # --------------------------------------------------------
-
     if recipe.owner_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -556,10 +536,8 @@ async def add_ingredient_to_recipe(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    # --------------------------------------------------------
-    # CHECK RECIPE
-    # --------------------------------------------------------
 
+    # CHECK RECIPE
     recipe_result = await db.execute(
         select(Recipe).where(
             Recipe.id == recipe_id
@@ -574,20 +552,16 @@ async def add_ingredient_to_recipe(
             detail="Recipe not found",
         )
 
-    # --------------------------------------------------------
+    
     # CHECK RECIPE OWNERSHIP
-    # --------------------------------------------------------
-
     if recipe.owner_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to modify this recipe",
         )
 
-    # --------------------------------------------------------
+    
     # CHECK INGREDIENT
-    # --------------------------------------------------------
-
     ingredient_result = await db.execute(
         select(Ingredient).where(
             Ingredient.id == ingredient_data.ingredient_id
@@ -602,16 +576,15 @@ async def add_ingredient_to_recipe(
             detail="Ingredient not found",
         )
 
-    # --------------------------------------------------------
+    
     # CREATE RECIPE-INGREDIENT RELATIONSHIP
-    # --------------------------------------------------------
 
     recipe_ingredient = RecipeIngredient(
-        recipe_id=recipe_id,
-        ingredient_id=ingredient_data.ingredient_id,
-        amount=ingredient_data.amount,
-        unit=ingredient_data.unit,
-        preparation=ingredient_data.preparation,
+    recipe_id=recipe_id,
+    ingredient_id=ingredient_data.ingredient_id,
+    amount=ingredient_data.amount,
+    unit=ingredient_data.unit,
+    preparation=ingredient_data.preparation,
     )
 
     db.add(recipe_ingredient)
@@ -635,10 +608,8 @@ async def list_recipe_ingredients(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    # --------------------------------------------------------
+    
     # CHECK RECIPE
-    # --------------------------------------------------------
-
     recipe_result = await db.execute(
         select(Recipe).where(
             Recipe.id == recipe_id
@@ -653,10 +624,8 @@ async def list_recipe_ingredients(
             detail="Recipe not found",
         )
 
-    # --------------------------------------------------------
+    
     # CHECK ACCESS
-    # --------------------------------------------------------
-
     if (
         recipe.owner_id != current_user.id
         and not recipe.is_public
@@ -666,9 +635,9 @@ async def list_recipe_ingredients(
             detail="You do not have permission to view this recipe",
         )
 
-    # --------------------------------------------------------
+    
     # GET INGREDIENTS WITH NAMES
-    # --------------------------------------------------------
+    
 
     statement = (
         select(
@@ -723,9 +692,9 @@ async def update_recipe_ingredient(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    # --------------------------------------------------------
+    
     # CHECK RECIPE
-    # --------------------------------------------------------
+    
 
     recipe_result = await db.execute(
         select(Recipe).where(
@@ -741,9 +710,9 @@ async def update_recipe_ingredient(
             detail="Recipe not found",
         )
 
-    # --------------------------------------------------------
+    
     # CHECK RECIPE OWNERSHIP
-    # --------------------------------------------------------
+    
 
     if recipe.owner_id != current_user.id:
         raise HTTPException(
@@ -751,9 +720,9 @@ async def update_recipe_ingredient(
             detail="You do not have permission to modify this recipe",
         )
 
-    # --------------------------------------------------------
+    
     # CHECK RECIPE INGREDIENT
-    # --------------------------------------------------------
+    
 
     result = await db.execute(
         select(RecipeIngredient).where(
@@ -770,9 +739,8 @@ async def update_recipe_ingredient(
             detail="Recipe ingredient not found",
         )
 
-    # --------------------------------------------------------
-    # UPDATE FIELDS
-    # --------------------------------------------------------
+    
+    # UPDATE FIELD
 
     if ingredient_data.amount is not None:
         recipe_ingredient.amount = ingredient_data.amount
@@ -804,9 +772,9 @@ async def delete_recipe_ingredient(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    # --------------------------------------------------------
+    
     # CHECK RECIPE
-    # --------------------------------------------------------
+
 
     recipe_result = await db.execute(
         select(Recipe).where(
@@ -822,9 +790,9 @@ async def delete_recipe_ingredient(
             detail="Recipe not found",
         )
 
-    # --------------------------------------------------------
+    
     # CHECK RECIPE OWNERSHIP
-    # --------------------------------------------------------
+
 
     if recipe.owner_id != current_user.id:
         raise HTTPException(
@@ -832,9 +800,9 @@ async def delete_recipe_ingredient(
             detail="You do not have permission to modify this recipe",
         )
 
-    # --------------------------------------------------------
+    
     # CHECK RECIPE INGREDIENT
-    # --------------------------------------------------------
+    
 
     result = await db.execute(
         select(RecipeIngredient).where(
@@ -851,10 +819,8 @@ async def delete_recipe_ingredient(
             detail="Recipe ingredient not found",
         )
 
-    # --------------------------------------------------------
+    
     # DELETE
-    # --------------------------------------------------------
-
     await db.delete(recipe_ingredient)
     await db.commit()
 

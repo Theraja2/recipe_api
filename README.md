@@ -1,3 +1,7 @@
+# STUDENT NAME : OBASI CHUKWUDI
+# APP-2025-47595
+
+
 # Recipe API
 
 A backend REST API built with FastAPI for managing recipes, ingredients, categories, users, authentication, recipe ownership, public recipes, search, filtering, and preparation/cooking time.
