@@ -2,7 +2,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.recipe_ingredient import RecipeIngredientDetailResponse
+from app.schemas.recipe_ingredient import (
+    RecipeIngredientDetailResponse
+)
+from app.schemas.recipe_step import (
+    RecipeStepCreate,
+    RecipeStepResponse,
+)
 
 
 class RecipeCreate(BaseModel):
@@ -21,6 +27,8 @@ class RecipeCreate(BaseModel):
         ge=0
     )
 
+    steps: list[RecipeStepCreate] = []
+
 
 class RecipeUpdate(BaseModel):
     name: str | None = None
@@ -37,6 +45,8 @@ class RecipeUpdate(BaseModel):
         default=None,
         ge=0
     )
+
+    steps: list[RecipeStepCreate] | None = None
 
 
 class RecipeResponse(BaseModel):
@@ -59,6 +69,7 @@ class RecipeResponse(BaseModel):
 
 class RecipeDetailResponse(RecipeResponse):
     ingredients: list[RecipeIngredientDetailResponse] = []
+    steps: list[RecipeStepResponse] = []
 
     model_config = ConfigDict(
         from_attributes=True
