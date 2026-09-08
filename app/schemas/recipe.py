@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.recipe_ingredient import (
     RecipeIngredientDetailResponse
 )
+
 from app.schemas.recipe_step import (
     RecipeStepCreate,
     RecipeStepResponse,
@@ -27,7 +28,28 @@ class RecipeCreate(BaseModel):
         ge=0
     )
 
-    steps: list[RecipeStepCreate] = []
+    steps: list[RecipeStepCreate] = Field(
+        default_factory=list
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "string",
+                "description": "string",
+                "category_id": 0,
+                "is_public": False,
+                "prep_minutes": 0,
+                "cook_minutes": 0,
+                "steps": [
+                    {
+                        "step_number": 1,
+                        "instruction": "string"
+                    }
+                ]
+            }
+        }
+    )
 
 
 class RecipeUpdate(BaseModel):
@@ -68,8 +90,13 @@ class RecipeResponse(BaseModel):
 
 
 class RecipeDetailResponse(RecipeResponse):
-    ingredients: list[RecipeIngredientDetailResponse] = []
-    steps: list[RecipeStepResponse] = []
+    ingredients: list[RecipeIngredientDetailResponse] = Field(
+        default_factory=list
+    )
+
+    steps: list[RecipeStepResponse] = Field(
+        default_factory=list
+    )
 
     model_config = ConfigDict(
         from_attributes=True

@@ -41,7 +41,7 @@ router = APIRouter(
 # POST /recipes
 @router.post(
     "",
-    response_model=RecipeResponse,
+    response_model=RecipeDetailResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_recipe(
@@ -81,9 +81,21 @@ async def create_recipe(
     db.add(recipe)
 
     await db.commit()
-    await db.refresh(recipe)
+
+    # Reload the recipe with its relationships
+    result = await db.execute(
+        select(Recipe)
+        .where(Recipe.id == recipe.id)
+        .options(
+            selectinload(Recipe.steps),
+            selectinload(Recipe.ingredients),
+        )
+    )
+
+    recipe = result.scalar_one()
 
     return recipe
+
 
 
 # LIST RECIPES
@@ -339,36 +351,20 @@ async def get_public_recipes(
 async def get_recipe(
     recipe_id: int,
     db: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),  
 ):
-    """
-    Get a single recipe.
-
-    Access rules:
-
-    - The owner can view their own recipe.
-    - Any authenticated user can view a public recipe.
-    - A user cannot view another user's private recipe.
-    """
-
-    
-    # GET RECIPE
     result = await db.execute(
         select(Recipe)
         .options(
-            selectinload(Recipe.ingredients),
+            selectinload(Recipe.ingredients).selectinload(
+                RecipeIngredient.ingredient
+            ),
             selectinload(Recipe.steps),
         )
-        .where(
-            Recipe.id == recipe_id
-        )
+        .where(Recipe.id == recipe_id)
     )
 
     recipe = result.scalar_one_or_none()
-
-    
-    # CHECK WHETHER RECIPE EXISTS
-    
 
     if recipe is None:
         raise HTTPException(
@@ -376,24 +372,40 @@ async def get_recipe(
             detail="Recipe not found",
         )
 
-
-
-    # CHECK OWNERSHIP / PUBLIC ACCESS
-    
-    if (
-        recipe.owner_id != current_user.id
-        and not recipe.is_public
-    ):
+    # Owner can view their recipe.
+    # Other authenticated users can only view it if it is public.
+    if recipe.owner_id != current_user.id and not recipe.is_public:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to view this recipe",
+            detail="Not authorized to view this recipe",
         )
 
-    
-    # RETURN RECIPE
-    return recipe
+    ingredients = [
+        RecipeIngredientDetailResponse(
+            id=recipe_ingredient.id,
+            recipe_id=recipe_ingredient.recipe_id,
+            ingredient_id=recipe_ingredient.ingredient_id,
+            ingredient_name=recipe_ingredient.ingredient.name,
+            amount=recipe_ingredient.amount,
+            unit=recipe_ingredient.unit,
+            preparation=recipe_ingredient.preparation,
+        )
+        for recipe_ingredient in recipe.ingredients
+    ]
 
-
+    return RecipeDetailResponse(
+        id=recipe.id,
+        name=recipe.name,
+        description=recipe.description,
+        category_id=recipe.category_id,
+        owner_id=recipe.owner_id,
+        is_public=recipe.is_public,
+        prep_minutes=recipe.prep_minutes,
+        cook_minutes=recipe.cook_minutes,
+        created_at=recipe.created_at,
+        ingredients=ingredients,
+        steps=recipe.steps,
+    )
 
 # UPDATE RECIPE
 # PUT /recipes/{recipe_id}
